@@ -460,4 +460,57 @@ describe('Parse.Push', () => {
       done();
     });
   });
+
+  fit('repro #4313', (done) => {
+    const user = new Parse.User();
+    user.set({
+      username: 'foo',
+      password: 'bar',
+      deviceToken: 'yoloToken'
+    })
+    const installation = new Parse.Installation();
+    installation.set('deviceToken', 'yoloToken');
+    installation.set('deviceType', 'ios');
+    let seenInstallations;
+    reconfigureServer({
+      push: {
+        adapter: {
+          send: function(body, installations) {
+            seenInstallations = installations;
+            return successfulAny(body, installations);
+          },
+          getValidPushTypes: function() {
+            return ["ios"];
+          }
+        }
+      }
+    }).then(() => {
+      return Parse.Object.saveAll([user, installation])
+    }).then(() => {
+      var userQuery = new Parse.Query(Parse.User);
+      userQuery.equalTo("objectId", user.id);
+
+      // Find devices associated with these users
+      var pushQuery = new Parse.Query(Parse.Installation);
+      pushQuery.matchesKeyInQuery('deviceToken', 'deviceToken', userQuery);
+
+      // Send push notification to query
+      return Parse.Push.send({
+        where: pushQuery,
+        data: {
+          alert: 'Yo!',
+        }
+      }, { useMasterKey: true });
+    }).then(() => {
+      // it is enqueued so it can take time
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve();
+        }, 200);
+      });
+    }).then(() => {
+      expect(seenInstallations.length).toBe(1);
+      expect(seenInstallations[0].deviceToken).toBe('yoloToken');
+    }).then(done, done.fail);
+  });
 });
