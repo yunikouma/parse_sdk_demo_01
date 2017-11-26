@@ -832,12 +832,14 @@ export default class SchemaController {
 
   // Validates the base CLP for an operation
   testBaseCLP(className, aclGroup, operation) {
-    if (!this.perms[className] || !this.perms[className][operation]) {
+    return SchemaController.testBaseCLP(this.perms[className], aclGroup, operation);
+  }
+
+  static testBaseCLP(classPermissions, aclGroup, operation) {
+    if (!classPermissions || !classPermissions[operation]) {
       return true;
     }
-    const classPerms = this.perms[className];
-    const perms = classPerms[operation];
-    // Handle the public scenario quickly
+    const perms = classPermissions[operation];
     if (perms['*']) {
       return true;
     }
@@ -848,19 +850,15 @@ export default class SchemaController {
     return false;
   }
 
-  // Validates an operation passes class-level-permissions set in the schema
-  validatePermission(className, aclGroup, operation) {
-
-    if (this.testBaseCLP(className, aclGroup, operation)) {
+  static validatePermission(classPermissions, className, aclGroup, operation) {
+    if (SchemaController.testBaseCLP(classPermissions, aclGroup, operation)) {
       return Promise.resolve();
     }
 
-    if (!this.perms[className] || !this.perms[className][operation]) {
+    if (!classPermissions || !classPermissions[operation]) {
       return true;
     }
-    const classPerms = this.perms[className];
-    const perms = classPerms[operation];
-
+    const perms = classPermissions[operation];
     // If only for authenticated users
     // make sure we have an aclGroup
     if (perms['requiresAuthentication']) {
@@ -888,11 +886,16 @@ export default class SchemaController {
     }
 
     // Process the readUserFields later
-    if (Array.isArray(classPerms[permissionField]) && classPerms[permissionField].length > 0) {
+    if (Array.isArray(classPermissions[permissionField]) && classPermissions[permissionField].length > 0) {
       return Promise.resolve();
     }
     throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN,
       `Permission denied for action ${operation} on class ${className}.`);
+  }
+
+  // Validates an operation passes class-level-permissions set in the schema
+  validatePermission(className, aclGroup, operation) {
+    return SchemaController.validatePermission(this.perms[className], className, aclGroup, operation);
   }
 
   // Returns the expected type for a className+key combination
