@@ -1,6 +1,7 @@
 var Parse = require('parse/node');
 var ParseLiveQueryServer = require('../src/LiveQuery/ParseLiveQueryServer').ParseLiveQueryServer;
 var ParseServer = require('../src/ParseServer').default;
+var LiveQueryController = require('../src/Controllers/LiveQueryController').LiveQueryController;
 
 // Global mock info
 var queryHashValue = 'hash';
@@ -145,86 +146,6 @@ describe('ParseLiveQueryServer', function() {
     parseServer.liveQueryServer.server.close();
     parseServer.server.close(done);
   });
-
-  it('properly passes the CLP to afterSave/afterDelete hook', function(done) {
-    function setPermissionsOnClass(className, permissions, doPut) {
-      var request = require('request');
-      let op = request.post;
-      if (doPut)
-      {
-        op = request.put;
-      }
-      return new Promise((resolve, reject) => {
-        op({
-          url: Parse.serverURL + '/schemas/' + className,
-          headers: {
-            'X-Parse-Application-Id': Parse.applicationId,
-            'X-Parse-Master-Key': Parse.masterKey,
-          },
-          json: true,
-          body: {
-            classLevelPermissions: permissions
-          }
-        }, (error, response, body) => {
-          if (error) {
-            return reject(error);
-          }
-          if (body.error) {
-            return reject(body);
-          }
-          return resolve(body);
-        })
-      });
-    }
-
-    let saveSpy;
-    let deleteSpy;
-    reconfigureServer({
-      liveQuery: {
-        classNames: ['Yolo']
-      }
-    }).then((parseServer) => {
-      saveSpy = spyOn(parseServer.config.liveQueryController, 'onAfterSave');
-      deleteSpy = spyOn(parseServer.config.liveQueryController, 'onAfterDelete');
-      return setPermissionsOnClass('Yolo', {
-        create: {'*': true},
-        delete: {'*': true}
-      })
-    }).then(() => {
-      const obj = new Parse.Object('Yolo');
-      return obj.save();
-    }).then((obj) => {
-      return obj.destroy();
-    }).then(() => {
-      expect(saveSpy).toHaveBeenCalled();
-      const saveArgs = saveSpy.calls.mostRecent().args;
-      expect(saveArgs.length).toBe(4);
-      expect(saveArgs[0]).toBe('Yolo');
-      expect(saveArgs[3]).toEqual({
-        get:  {},
-        addField: {},
-        create: {'*': true},
-        find: {},
-        update: {},
-        delete: {'*': true},
-      });
-
-      expect(deleteSpy).toHaveBeenCalled();
-      const deleteArgs = deleteSpy.calls.mostRecent().args;
-      expect(deleteArgs.length).toBe(4);
-      expect(deleteArgs[0]).toBe('Yolo');
-      expect(deleteArgs[3]).toEqual({
-        get:  {},
-        addField: {},
-        create: {'*': true},
-        find: {},
-        update: {},
-        delete: {'*': true},
-      });
-      done();
-    }).catch(done.fail);
-  });
-
 
   it('can handle connect command', function() {
     var parseLiveQueryServer = new ParseLiveQueryServer(10, 10, {});
@@ -1430,4 +1351,127 @@ describe('ParseLiveQueryServer', function() {
     }
     return message;
   }
+});
+
+describe('LiveQueryController', () => {
+  it('properly passes the CLP to afterSave/afterDelete hook', function(done) {
+    function setPermissionsOnClass(className, permissions, doPut) {
+      var request = require('request');
+      let op = request.post;
+      if (doPut)
+      {
+        op = request.put;
+      }
+      return new Promise((resolve, reject) => {
+        op({
+          url: Parse.serverURL + '/schemas/' + className,
+          headers: {
+            'X-Parse-Application-Id': Parse.applicationId,
+            'X-Parse-Master-Key': Parse.masterKey,
+          },
+          json: true,
+          body: {
+            classLevelPermissions: permissions
+          }
+        }, (error, response, body) => {
+          if (error) {
+            return reject(error);
+          }
+          if (body.error) {
+            return reject(body);
+          }
+          return resolve(body);
+        })
+      });
+    }
+
+    let saveSpy;
+    let deleteSpy;
+    reconfigureServer({
+      liveQuery: {
+        classNames: ['Yolo']
+      }
+    }).then((parseServer) => {
+      saveSpy = spyOn(parseServer.config.liveQueryController, 'onAfterSave').and.callThrough();
+      deleteSpy = spyOn(parseServer.config.liveQueryController, 'onAfterDelete').and.callThrough();
+      return setPermissionsOnClass('Yolo', {
+        create: {'*': true},
+        delete: {'*': true}
+      })
+    }).then(() => {
+      const obj = new Parse.Object('Yolo');
+      return obj.save();
+    }).then((obj) => {
+      return obj.destroy();
+    }).then(() => {
+      expect(saveSpy).toHaveBeenCalled();
+      const saveArgs = saveSpy.calls.mostRecent().args;
+      expect(saveArgs.length).toBe(4);
+      expect(saveArgs[0]).toBe('Yolo');
+      expect(saveArgs[3]).toEqual({
+        get:  {},
+        addField: {},
+        create: {'*': true},
+        find: {},
+        update: {},
+        delete: {'*': true},
+      });
+
+      expect(deleteSpy).toHaveBeenCalled();
+      const deleteArgs = deleteSpy.calls.mostRecent().args;
+      expect(deleteArgs.length).toBe(4);
+      expect(deleteArgs[0]).toBe('Yolo');
+      expect(deleteArgs[3]).toEqual({
+        get:  {},
+        addField: {},
+        create: {'*': true},
+        find: {},
+        update: {},
+        delete: {'*': true},
+      });
+      done();
+    }).catch(done.fail);
+  });
+
+  it('should properly pack message request on afterSave', () => {
+    const controller = new LiveQueryController({
+      classNames: ['Yolo'],
+    });
+    const spy = spyOn(controller.liveQueryPublisher, 'onCloudCodeAfterSave');
+    controller.onAfterSave('Yolo', {o: 1}, {o:2}, {yolo: true});
+    expect(spy).toHaveBeenCalled()
+    const args = spy.calls.mostRecent().args;
+    expect(args.length).toBe(1);
+    expect(args[0]).toEqual({
+      object: {o: 1},
+      original: {o: 2},
+      classLevelPermissions: {yolo: true}
+    })
+  });
+
+  it('should properly pack message request on afterDelete', () => {
+    const controller = new LiveQueryController({
+      classNames: ['Yolo'],
+    });
+    const spy = spyOn(controller.liveQueryPublisher, 'onCloudCodeAfterDelete');
+    controller.onAfterDelete('Yolo', {o: 1}, {o:2}, {yolo: true});
+    expect(spy).toHaveBeenCalled()
+    const args = spy.calls.mostRecent().args;
+    expect(args.length).toBe(1);
+    expect(args[0]).toEqual({
+      object: {o: 1},
+      original: {o: 2},
+      classLevelPermissions: {yolo: true}
+    })
+  });
+
+  it('should properly pack message request', () => {
+    const controller = new LiveQueryController({
+      classNames: ['Yolo'],
+    });
+    expect(controller._makePublisherRequest({})).toEqual({
+      object: {},
+      original: undefined,
+    });
+  });
 });
